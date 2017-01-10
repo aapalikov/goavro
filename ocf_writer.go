@@ -187,6 +187,8 @@ type Writer struct {
 	toBlock          chan interface{}
 	w                io.Writer
 	writerDone       chan struct{}
+	RecordChan       chan Record
+	Use_chan         bool
 	blockTick        time.Duration
 }
 
@@ -259,6 +261,7 @@ func NewWriter(setters ...WriterSetter) (*Writer, error) {
 		return nil, &ErrWriterInit{Err: err}
 	}
 	// setup writing pipeline
+	fw.Use_chan = false
 	fw.toBlock = make(chan interface{})
 	toEncode := make(chan *writerBlock)
 	toCompress := make(chan *writerBlock)
@@ -269,6 +272,12 @@ func NewWriter(setters ...WriterSetter) (*Writer, error) {
 	go compressor(fw, toCompress, toWrite)
 	go writer(fw, longCodec(), toWrite)
 	return fw, nil
+}
+
+// Function to add functionality of reusing records
+func (fw *Writer) AddChan(RecordCh  chan Record) {
+	fw.Use_chan = true
+	fw.RecordChan = RecordCh
 }
 
 // Close is called when the open file is no longer needed. It flushes
@@ -369,6 +378,15 @@ func encoder(fw *Writer, toEncode <-chan *writerBlock, toCompress chan<- *writer
 			}
 		}
 		toCompress <- block
+
+		// reuse Records for performance sake, set values to default later
+		if fw.Use_chan {
+			for _, item := range block.items {
+				if item != nil {
+					fw.RecordChan <- *(item.(*Record))
+				}
+			}
+		}
 	}
 	close(toCompress)
 }
